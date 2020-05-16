@@ -1,10 +1,11 @@
 package com.docwei.simpleokhttp
 
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import com.docwei.okhttp.OkHttpClient
-import com.docwei.okhttp.Request
+import com.docwei.okhttp.*
+import java.io.IOException
 import java.util.concurrent.*
 
 class MainActivity : AppCompatActivity() {
@@ -14,32 +15,21 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
     }
 
-    private var executorServiceOrNull: ExecutorService? = null
-
-    @get:Synchronized
-    @get:JvmName("executorService")
-    val executorService: ExecutorService
-        get() {
-            if (executorServiceOrNull == null) {
-                executorServiceOrNull = ThreadPoolExecutor(0, Int.MAX_VALUE, 60, TimeUnit.SECONDS,
-                    SynchronousQueue(), ThreadFactory { runnable ->
-                        Thread(runnable, "okhttp").apply {
-                            isDaemon = false
-                        }
-                    })
-            }
-            return executorServiceOrNull!!
-        }
-
-    fun clickSyn(view: View) {
+    fun http1Click(view: View) {
         val request: Request = Request.Builder()
             .url("https://www.baidu.com/")
             .get()
             .build()
+        client.newCall(request).enqueue(object:Callback{
+            override fun onFailure(call: RealCall, e: IOException) {
+                 Log.e("okhttp",e.message)
+            }
+            override fun onResponse(call: RealCall, response: Response) {
+                Log.e("okhttp",response?.body?.string())
+            }
 
-        client.newCall(request).enqueue()
+        })
     }
-
 
     fun http2Click(view: View) {
 

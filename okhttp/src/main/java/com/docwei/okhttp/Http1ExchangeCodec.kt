@@ -1,23 +1,18 @@
 package com.docwei.okhttp
 
+import android.util.Log
 import headersContentLength
 import okio.*
 import java.io.IOException
 import java.net.ProtocolException
 
-class Http1ExchangeCodec internal constructor(
-    private val source: BufferedSource
-) {
-    private fun Response.isChunked() =
-        "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
-
+class Http1ExchangeCodec internal constructor(private val source: BufferedSource) {
+    private fun Response.isChunked() = "chunked".equals(header("Transfer-Encoding"), ignoreCase = true)
 
     private abstract inner class AbstractSource : Source {
         protected val timeout = ForwardingTimeout(source.timeout())
         protected var closed: Boolean = false
-
         override fun timeout(): Timeout = timeout
-
         override fun read(sink: Buffer, byteCount: Long): Long {
             return try {
                 source.read(sink, byteCount)
@@ -25,22 +20,15 @@ class Http1ExchangeCodec internal constructor(
                 throw e
             }
         }
-
-
     }
 
     /** An HTTP body with a fixed length specified in advance. */
-   private  inner class FixedLengthSource internal constructor(private var bytesRemaining: Long) :
-        AbstractSource() {
-
-
+    private inner class FixedLengthSource internal constructor(private var bytesRemaining: Long) : AbstractSource() {
         override fun read(sink: Buffer, byteCount: Long): Long {
             require(byteCount >= 0L) { "byteCount < 0: $byteCount" }
             check(!closed) { "closed" }
             if (bytesRemaining == 0L) return -1
-
             val read = super.read(sink, minOf(bytesRemaining, byteCount))
-
             bytesRemaining -= read
             if (bytesRemaining == 0L) {
                 //读取响应完成
@@ -50,15 +38,12 @@ class Http1ExchangeCodec internal constructor(
 
         override fun close() {
             if (closed) return
-
-
             closed = true
         }
     }
 
     /** An HTTP body with alternating chunk sizes and chunk bodies. */
-    private inner class ChunkedSource internal constructor(private val url: HttpUrl) :
-        AbstractSource() {
+    private inner class ChunkedSource internal constructor(private val url: HttpUrl) : AbstractSource() {
         private var bytesRemainingInChunk = NO_CHUNK_YET
         private var hasMoreChunks = true
 
@@ -71,7 +56,7 @@ class Http1ExchangeCodec internal constructor(
                 readChunkSize()
                 if (!hasMoreChunks) return -1
             }
-
+            Log.e("okhttp", "bytesRemainingInChunk--->${bytesRemainingInChunk}")
             val read = super.read(sink, minOf(byteCount, bytesRemainingInChunk))
             bytesRemainingInChunk -= read
             return read
@@ -85,39 +70,30 @@ class Http1ExchangeCodec internal constructor(
             try {
                 bytesRemainingInChunk = source.readHexadecimalUnsignedLong()
                 val extensions = source.readUtf8LineStrict().trim()
-                if (bytesRemainingInChunk < 0L || extensions.isNotEmpty() && !extensions.startsWith(
-                        ";"
-                    )
-                ) {
-                    throw ProtocolException(
-                        "expected chunk size and optional extensions" +
+                if (bytesRemainingInChunk < 0L || extensions.isNotEmpty() && !extensions.startsWith(";")) {
+                    throw ProtocolException("expected chunk size and optional extensions" +
                                 " but was \"$bytesRemainingInChunk$extensions\""
                     )
                 }
             } catch (e: NumberFormatException) {
                 throw ProtocolException(e.message)
             }
-
             if (bytesRemainingInChunk == 0L) {
                 hasMoreChunks = false
             }
         }
-
         override fun close() {
             if (closed) return
             closed = true
         }
     }
-
     /** An HTTP message body terminated by the end of the underlying stream. */
     private inner class UnknownLengthSource : AbstractSource() {
         private var inputExhausted: Boolean = false
-
         override fun read(sink: Buffer, byteCount: Long): Long {
             require(byteCount >= 0L) { "byteCount < 0: $byteCount" }
             check(!closed) { "closed" }
             if (inputExhausted) return -1
-
             val read = super.read(sink, byteCount)
             if (read == -1L) {
                 inputExhausted = true
@@ -125,7 +101,6 @@ class Http1ExchangeCodec internal constructor(
             }
             return read
         }
-
         override fun close() {
             if (closed) return
             if (!inputExhausted) {
@@ -140,7 +115,7 @@ class Http1ExchangeCodec internal constructor(
             else -> {
                 val contentLength = response.headersContentLength()
                 if (contentLength != -1L) {
-                   FixedLengthSource(contentLength)
+                    FixedLengthSource(contentLength)
                 } else {
                     UnknownLengthSource()
                 }
@@ -148,20 +123,15 @@ class Http1ExchangeCodec internal constructor(
         }
     }
 
-   class ResponseBodySource(
-        delegate: Source,
-        private val contentLength: Long
-    ) : ForwardingSource(delegate) {
+    class ResponseBodySource(delegate: Source, private val contentLength: Long) : ForwardingSource(delegate) {
         private var bytesReceived = 0L
         private var completed = false
         private var closed = false
-
         init {
             if (contentLength == 0L) {
                 complete(null)
             }
         }
-
         @Throws(IOException::class)
         override fun read(sink: Buffer, byteCount: Long): Long {
             check(!closed) { "closed" }
@@ -208,18 +178,7 @@ class Http1ExchangeCodec internal constructor(
     }
 
 
-
-
     companion object {
         private const val NO_CHUNK_YET = -1L
-
-        private const val STATE_IDLE = 0 // Idle connections are ready to write request headers.
-        private const val STATE_OPEN_REQUEST_BODY = 1
-        private const val STATE_WRITING_REQUEST_BODY = 2
-        private const val STATE_READ_RESPONSE_HEADERS = 3
-        private const val STATE_OPEN_RESPONSE_BODY = 4
-        private const val STATE_READING_RESPONSE_BODY = 5
-        private const val STATE_CLOSED = 6
-        private const val HEADER_LIMIT = 256 * 1024
     }
 }
