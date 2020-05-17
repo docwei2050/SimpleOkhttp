@@ -20,7 +20,7 @@ import javax.net.ssl.SSLSocket
 
 private const val HEADER_LIMIT = 256 * 1024
 
-class RealCall1 constructor(var okHttpClient: OkHttpClient, var request: Request):Call {
+class RealCall1_1 constructor(var okHttpClient: OkHttpClient, var request: Request):Call {
     private var rawSocket: Socket? = null
     private var source: BufferedSource? = null
     private var sink: BufferedSink? = null
@@ -156,7 +156,7 @@ class RealCall1 constructor(var okHttpClient: OkHttpClient, var request: Request
                         .writeUtf8("\r\n")
                 }
                 sink.writeUtf8("\r\n")
-                
+
                 //step6: 开始写请求体
                 //get请求和head请求不能有请求体
                 if (HttpMethod.permitsRequestBody(request.method) && request.body != null) {
@@ -291,9 +291,9 @@ class RealCall1 constructor(var okHttpClient: OkHttpClient, var request: Request
     }
 
     companion object {
-        fun newRealCall(client: OkHttpClient, originalRequest: Request): RealCall1 {
+        fun newRealCall(client: OkHttpClient, originalRequest: Request): RealCall1_1 {
             // Safely publish the Call instance to the EventListener.
-            return RealCall1(client, originalRequest)
+            return RealCall1_1(client, originalRequest)
         }
 
     }

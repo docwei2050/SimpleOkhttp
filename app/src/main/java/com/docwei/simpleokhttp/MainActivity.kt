@@ -17,7 +17,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
     }
 
-    fun http1Click(view: View) {
+    fun http1_1Click(view: View) {
         val request: Request = Request.Builder()
             .url("https://www.baidu.com/")
             .get()

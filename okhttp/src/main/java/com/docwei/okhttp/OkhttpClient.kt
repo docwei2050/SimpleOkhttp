@@ -32,8 +32,8 @@ open class OkHttpClient internal constructor(builder: Builder) : Cloneable {
     }
 
     /** Prepares the [request] to be executed at some point in the future. */
-     fun newCall(request: Request): RealCall1 {
-        return RealCall1.newRealCall(this, request);
+     fun newCall(request: Request): RealCall1_1 {
+        return RealCall1_1.newRealCall(this, request);
     }
     fun newCall2(request: Request): RealCall2 {
         return RealCall2.newRealCall(this, request);
