@@ -1,5 +1,6 @@
 package com.docwei.okhttp
 
+import android.util.Log
 import checkOffsetAndCount
 import okio.BufferedSink
 import okio.ByteString
@@ -95,6 +96,7 @@ abstract class RequestBody {
                     charset = resolvedCharset
                 }
             }
+            Log.e("okhttp","finalContentType-->${finalContentType}")
             val bytes = toByteArray(charset)
             return bytes.toRequestBody(finalContentType, 0, bytes.size)
         }
@@ -103,6 +105,7 @@ abstract class RequestBody {
         @JvmStatic
         @JvmName("create")
         fun ByteString.toRequestBody(contentType: MediaType? = null): RequestBody {
+            Log.e("okhttp","okhttp-content--.${contentType}")
             return object : RequestBody() {
                 override fun contentType() = contentType
 
@@ -123,6 +126,7 @@ abstract class RequestBody {
             offset: Int = 0,
             byteCount: Int = size
         ): RequestBody {
+            Log.e("okhttp","okhttp-content--.${contentType}")
             checkOffsetAndCount(size.toLong(), offset.toLong(), byteCount.toLong())
             return object : RequestBody() {
                 override fun contentType() = contentType

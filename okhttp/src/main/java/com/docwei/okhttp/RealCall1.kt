@@ -5,6 +5,7 @@ import android.util.Log
 import closeQuietly
 import concat
 import headersContentLength
+import immutableListOf
 import indexOf
 import intersect
 import okhttp3.CipherSuite
@@ -12,16 +13,14 @@ import okhttp3.internal.http.RequestLine
 import okhttp3.internal.http.StatusLine
 import okio.*
 import toHostHeader
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.net.SocketException
-import java.net.UnknownHostException
+import java.net.*
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLSocket
 
 private const val HEADER_LIMIT = 256 * 1024
 
-class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request) {
+class RealCall1 constructor(var okHttpClient: OkHttpClient, var request: Request):Call {
     private var rawSocket: Socket? = null
     private var source: BufferedSource? = null
     private var sink: BufferedSink? = null
@@ -55,7 +54,8 @@ class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request)
             //一个RealConnection对应一个route
             //基于host去查找 可能会返回多个InetAddress
             //如果基于这个InetAddress创建的连接失败，就去尝试用下一个InetAddress
-            var addresses = Dns.SYSTEM.lookup(request.url.host)
+           // var addresses = Dns.SYSTEM.lookup(request.url.host)
+            var addresses:List<InetAddress> = InetAddress.getAllByName(request.url.host).toList()
             //www.baidu.com/182.61.200.6   www.baidu.com/182.61.200.7
             if (addresses.isEmpty()) {
                 throw UnknownHostException("${Dns.SYSTEM} returned no addresses for ${request.url.host}")
@@ -74,8 +74,7 @@ class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request)
             sink = rawSocket.sink().buffer()
 
             //step4:创建Tls连接 握手   加一层ssl
-            sslSocket = okHttpClient.sslSocketFactory!!.createSocket(rawSocket,
-                request.url.host, request.url.port, true) as SSLSocket
+            sslSocket = okHttpClient.sslSocketFactory!!.createSocket(rawSocket, request.url.host, request.url.port, true) as SSLSocket
             //与服务器协商时，需要给sslSocket设置共同的配置
             //客户端支持 TLSv1.3 TLSv1.2
             var tlsConnectionSpec: ConnectionSpec = ConnectionSpec.MODERN_TLS
@@ -114,7 +113,13 @@ class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request)
            /* val socketFactory =
                 SSLCertificateSocketFactory.getDefault(10_000) as SSLCertificateSocketFactory
             socketFactory.setUseSessionTickets(sslSocket, true)*/
-
+            val sslSocketClass =
+                Class.forName("com.android.org.conscrypt.OpenSSLSocketImpl") as Class<in SSLSocket>
+            val setAlpnProtocols =
+                sslSocketClass.getMethod("setAlpnProtocols", ByteArray::class.java)
+            //握手前配置 configureTlsExtensions
+            var protocols = immutableListOf(Protocol.HTTP_1_1, Protocol.HTTP_2)
+            setAlpnProtocols.invoke(sslSocket, concatLengthPrefixed(protocols))
 
             //开始握手
             sslSocket.startHandshake()
@@ -123,77 +128,96 @@ class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request)
             sink = sslSocket.sink().buffer()
             success=true
 
+
+
             sslSocket.soTimeout = 10_000
             val sink = sink!!
             val source = source!!
-            source.timeout().timeout(10_000L, TimeUnit.MILLISECONDS)
-            sink.timeout().timeout(10_000L, TimeUnit.MILLISECONDS)
-
-            //step5:开始写请求头
-            val requestLine = RequestLine.get(request)
-            sink.writeUtf8(requestLine).writeUtf8("\r\n")
-            for (i in 0 until request.headers.size) {
-                sink.writeUtf8(request.headers.name(i))
-                    .writeUtf8(": ")
-                    .writeUtf8(request.headers.value(i))
-                    .writeUtf8("\r\n")
-            }
-            sink.writeUtf8("\r\n")
 
 
-            //step6: 开始写请求体
-            //get请求和head请求不能有请求体
-            if (HttpMethod.permitsRequestBody(request.method) && request.body != null) {
-                //Expected:100-continue 请求头不支持
-                //请求体默认不支持isDuplex
-                var bufferRequestBody = request.body
-                bufferRequestBody?.writeTo(sink)
-                sink.close()
-            } else {
-                sink.flush()
-            }
+            //可以在这里判断是走的http1.1还是http2.0(h2)
+            val getAlpnSelectedProtocol = sslSocketClass.getMethod("getAlpnSelectedProtocol")
+            val alpnResult = getAlpnSelectedProtocol.invoke(sslSocket) as ByteArray?
+            val protocolStr = if (alpnResult != null) String(alpnResult, StandardCharsets.UTF_8) else null
+            //默认是http1.1
+            val protocol = if (protocolStr != null) Protocol.get(protocolStr) else Protocol.HTTP_1_1
 
-            //step7: 读取响应头
-            val statusLine = StatusLine.parse(readHeaderLine(source))
-            val response = Response.Builder()
-                .code(statusLine.code)
-                .request(request)
-                .message(statusLine.message)
-                .headers(readHeaders(source)).build()
+            if (protocol == Protocol.HTTP_1_1) {
+                source.timeout().timeout(10_000L, TimeUnit.MILLISECONDS)
+                sink.timeout().timeout(10_000L, TimeUnit.MILLISECONDS)
 
-            Log.e("okhttp", "response.code" + response.code)
-            val contentType = response.header("Content-Type")
-            val contentLength = response.headersContentLength()
-
-           //这里看起来只是包装了source
-            //step8: 处理响应体
-            val rawSource = Http1ExchangeCodec(source).openResponseBodySource(response)
-            val sourceWrapper = Http1ExchangeCodec.ResponseBodySource(rawSource, contentLength)
-            val networkResponse = response.newBuilder()
-                .body(RealResponseBody(contentType, contentLength, sourceWrapper.buffer()))
-                .build()
-
-            val responseBuilder = response.newBuilder()
-
-            //如果走的gzip压缩，那么就需要解压gzip的流
-            //step9: 流解压
-            if (transparentGzip
-                && "gzip".equals(networkResponse.header("Content-Encoding"), ignoreCase = true)
-                && networkResponse.promisesBody()
-            ) {
-                val responseBody = networkResponse.body
-                if (responseBody != null) {
-                    val gzipSource = GzipSource(responseBody.source())
-                    val strippedHeaders = networkResponse.headers.newBuilder()
-                        .removeAll("Content-Encoding")
-                        .removeAll("Content-Length")
-                        .build()
-                    responseBuilder.headers(strippedHeaders)
-                    val contentType = networkResponse.header("Content-Type")
-                    responseBuilder.body(RealResponseBody(contentType, -1L, gzipSource.buffer()))
+                //step5:开始写请求头
+                val requestLine = RequestLine.get(request)
+                sink.writeUtf8(requestLine).writeUtf8("\r\n")
+                for (i in 0 until request.headers.size) {
+                    sink.writeUtf8(request.headers.name(i))
+                        .writeUtf8(": ")
+                        .writeUtf8(request.headers.value(i))
+                        .writeUtf8("\r\n")
                 }
+                sink.writeUtf8("\r\n")
+                
+                //step6: 开始写请求体
+                //get请求和head请求不能有请求体
+                if (HttpMethod.permitsRequestBody(request.method) && request.body != null) {
+                    //Expected:100-continue 请求头不支持
+                    //请求体默认不支持isDuplex
+                    var bufferRequestBody = request.body
+                    bufferRequestBody?.writeTo(sink)
+                    sink.close()
+                } else {
+                    sink.flush()
+                }
+
+                //step7: 读取响应头
+                val statusLine = StatusLine.parse(readHeaderLine(source))
+                val response = Response.Builder()
+                    .code(statusLine.code)
+                    .request(request)
+                    .message(statusLine.message)
+                    .headers(readHeaders(source)).build()
+
+                Log.e("okhttp", "response.code" + response.code)
+                val contentType = response.header("Content-Type")
+                val contentLength = response.headersContentLength()
+
+                //这里看起来只是包装了source
+                //step8: 处理响应体
+                val rawSource = Http1ExchangeCodec(source).openResponseBodySource(response)
+                val sourceWrapper = Http1ExchangeCodec.ResponseBodySource(rawSource, contentLength)
+                val networkResponse = response.newBuilder()
+                    .body(RealResponseBody(contentType, contentLength, sourceWrapper.buffer()))
+                    .build()
+
+                val responseBuilder = response.newBuilder()
+
+                //如果走的gzip压缩，那么就需要解压gzip的流
+                //step9: 流解压
+                if (transparentGzip
+                    && "gzip".equals(networkResponse.header("Content-Encoding"), ignoreCase = true)
+                    && networkResponse.promisesBody()
+                ) {
+                    val responseBody = networkResponse.body
+                    if (responseBody != null) {
+                        val gzipSource = GzipSource(responseBody.source())
+                        val strippedHeaders = networkResponse.headers.newBuilder()
+                            .removeAll("Content-Encoding")
+                            .removeAll("Content-Length")
+                            .build()
+                        responseBuilder.headers(strippedHeaders)
+                        val contentType = networkResponse.header("Content-Type")
+                        responseBuilder.body(
+                            RealResponseBody(
+                                contentType,
+                                -1L,
+                                gzipSource.buffer()
+                            )
+                        )
+                    }
+                }
+                return responseBuilder.build()
             }
-            return responseBuilder.build()
+            return Response.Builder().build()
         } catch (e: IOException) {
             sslSocket?.closeQuietly()
             rawSocket?.close()
@@ -267,10 +291,25 @@ class RealCall constructor(var okHttpClient: OkHttpClient, var request: Request)
     }
 
     companion object {
-        fun newRealCall(client: OkHttpClient, originalRequest: Request): RealCall {
+        fun newRealCall(client: OkHttpClient, originalRequest: Request): RealCall1 {
             // Safely publish the Call instance to the EventListener.
-            return RealCall(client, originalRequest)
+            return RealCall1(client, originalRequest)
         }
 
     }
+    /**
+     * Returns the concatenation of 8-bit, length prefixed protocol names.
+     * http://tools.ietf.org/html/draft-agl-tls-nextprotoneg-04#page-4
+     */
+    fun concatLengthPrefixed(protocols: List<Protocol>): ByteArray {
+        val result = Buffer()
+        for (protocol in alpnProtocolNames(protocols)) {
+            result.writeByte(protocol.length)
+            result.writeUtf8(protocol)
+        }
+        return result.readByteArray()
+    }
+
+    fun alpnProtocolNames(protocols: List<Protocol>) =
+        protocols.map { it.toString() }
 }

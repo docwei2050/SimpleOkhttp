@@ -7,7 +7,6 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
-import javax.xml.bind.annotation.XmlType
 
 
 open class OkHttpClient internal constructor(builder: Builder) : Cloneable {
@@ -30,15 +29,15 @@ open class OkHttpClient internal constructor(builder: Builder) : Cloneable {
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<TrustManager>(x509TrustManager), null)
         sslSocketFactoryOrNull = sslContext.socketFactory
-
-
     }
 
     /** Prepares the [request] to be executed at some point in the future. */
-     fun newCall(request: Request): RealCall {
-        return RealCall.newRealCall(this, request);
+     fun newCall(request: Request): RealCall1 {
+        return RealCall1.newRealCall(this, request);
     }
-
+    fun newCall2(request: Request): RealCall2 {
+        return RealCall2.newRealCall(this, request);
+    }
 
 class Builder constructor() {
     internal var dispatcher: Dispatcher = Dispatcher();

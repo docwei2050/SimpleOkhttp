@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.util.*
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
+import com.docwei.okhttp.http2.Header
 
 import com.docwei.okhttp.ResponseBody.Companion.toResponseBody
 
@@ -35,7 +36,13 @@ private val UNICODE_BOMS = Options.of(
     "0000ffff".decodeHex(), // UTF-32BE
     "ffff0000".decodeHex() // UTF-32LE
 )
-
+fun List<Header>.toHeaders(): Headers {
+    val builder = Headers.Builder()
+    for ((name, value) in this) {
+        builder.addLenient(name.utf8(), value.utf8())
+    }
+    return builder.build()
+}
 /** GMT and UTC are equivalent for our purposes. */
 @JvmField
 val UTC = TimeZone.getTimeZone("GMT")!!
@@ -242,13 +249,7 @@ fun Char.parseHexDigit(): Int = when (this) {
     else -> -1
 }
 
-fun List<Header>.toHeaders(): Headers {
-    val builder = Headers.Builder()
-    for ((name, value) in this) {
-        builder.addLenient(name.utf8(), value.utf8())
-    }
-    return builder.build()
-}
+
 
 fun Headers.toHeaderList(): List<Header> = (0 until size).map {
     Header(name(it), value(it))

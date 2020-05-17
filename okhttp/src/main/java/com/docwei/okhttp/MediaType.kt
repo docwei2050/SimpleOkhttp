@@ -11,8 +11,7 @@ class MediaType private constructor(
     @get:JvmName("subType")
     val subType:String,
     private val charset:String?){
-
-
+    override fun toString()=mediaType
     @JvmOverloads
     fun charset(defaultValue: Charset? = null): Charset? {
         return try {
